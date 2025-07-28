@@ -1,0 +1,16 @@
+# Python 暫存檔案
+__pycache__/
+*.pyc
+
+# 測試產生的 log
+login_test_log.txt
+logs/
+
+# VSCode 設定
+.vscode/
+
+# Mac 系統垃圾
+.DS_Store
+
+# 虛擬環境（可選）
+venv/
