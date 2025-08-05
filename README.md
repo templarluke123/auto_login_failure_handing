@@ -1,3 +1,7 @@
+20250805
+Update router login condition.
+
+
 # 🔐 Login Lockout Tester v2.0
 
 這是一個用 Python + Selenium 製作的 GUI 自動化測試工具，可模擬登入失敗行為並檢查網站帳號鎖定機制是否正確運作。
