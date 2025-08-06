@@ -5,6 +5,7 @@ __pycache__/
 # 測試產生的 log
 login_test_log.txt
 logs/
+dist/
 
 # VSCode 設定
 .vscode/
@@ -17,3 +18,6 @@ venv/
 
 # 私人設定
 config.json
+
+# 排除本地 build 出來的 .exe（例如 pyinstaller 或 auto-py-to-exe）
+*.exe
