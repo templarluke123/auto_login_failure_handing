@@ -1,147 +1,175 @@
-import tkinter as tk
-from tkinter import messagebox
+import argparse
+import time
+import traceback
+from datetime import datetime
+from pathlib import Path
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-import threading
-import time
-import traceback
-from datetime import datetime
 
-# Log 測試結果
+
 def log_result(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open("login_test_log.txt", "a", encoding="utf-8") as log_file:
-        log_file.write(f"[{timestamp}] {message}\n")
+    Path("login_test_results/logs").mkdir(parents=True, exist_ok=True)
+    with open("login_test_results/logs/login_test_log.txt", "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {message}\n")
 
-# 主測試函式
-def run_test(case):
-    url = url_entry.get().strip()
-    username = username_entry.get()
-    password = password_entry.get()
-    device_type = device_var.get()
 
-    if not url.startswith("http://") and not url.startswith("https://"):
+def run_test(url, username, password, device_type, case, headed=False):
+    if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
-    if not url or not username or not password:
-        messagebox.showwarning("輸入錯誤", "請填寫所有欄位")
-        return
-
     driver = None
-
     try:
         print("啟動 ChromeDriver...")
+        options = webdriver.ChromeOptions()
+        if not headed:
+            options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
         service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service)
+        driver = webdriver.Chrome(service=service, options=options)
         wait = WebDriverWait(driver, 10)
-        driver.get(url)
 
-        max_attempts = {"case1": 3, "case2": 6, "case3": 9}.get(case, 3)
+        max_attempts = {"case1": 3, "case2": 6, "case3": 9, "case4": 12}.get(case, 3)
+        lock_9 = lock_12 = False
 
         for i in range(max_attempts):
-            attempt_num = i + 1
-            print(f"{case} - 第 {attempt_num} 次登入嘗試")
+            attempt = i + 1
+            print(f"{case} - 第 {attempt} 次登入嘗試")
+
+            driver.get(url)
+            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            time.sleep(1)
 
             try:
-                # 根據設備類型選擇欄位
-                if device_type == "router":
-                    username_input = wait.until(EC.presence_of_element_located((By.NAME, "username")))
-                    password_input = driver.find_element(By.NAME, "password")
-                    login_button = driver.find_element(By.XPATH, '//a[contains(@onclick, "checklogin")]')
-                elif device_type == "extender":
-                    username_input = wait.until(EC.presence_of_element_located((By.ID, "userId")))
-                    password_input = driver.find_element(By.ID, "password")
-                    login_button = driver.find_element(By.ID, "loginBt")
-                else:
-                    raise Exception("未知設備類型")
+                u = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+                p = wait.until(EC.presence_of_element_located((By.NAME, "password")))
 
-                username_input.clear()
-                password_input.clear()
-                username_input.send_keys(username)
-                password_input.send_keys(password)
-                login_button.click()
+                btn_div = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.loginButton > div")))
+                btn_a = driver.find_elements(By.CSS_SELECTOR, "div.loginButton > a, a[onclick*='checklogin']")
+                btn_a = btn_a[0] if btn_a else None
+
+                u.click(); u.clear(); u.send_keys(username)
+                p.click(); p.clear(); p.send_keys(password)
+                log_result(f"[{case}] 第 {attempt} 次 - 填入帳密: user={u.get_attribute('value')} pass_len={len(p.get_attribute('value') or '')}")
+
+                clicked = False
+                try:
+                    WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.CSS_SELECTOR, "div.loginButton > div")))
+                    btn_div.click()
+                    clicked = True
+                except Exception:
+                    pass
+
+                if not clicked and btn_a:
+                    try:
+                        btn_a.click()
+                        clicked = True
+                    except Exception:
+                        try:
+                            driver.execute_script("arguments[0].click();", btn_a)
+                            clicked = True
+                        except Exception:
+                            pass
+
+                if not clicked:
+                    driver.execute_script("return checklogin(document.forms[0]);")
 
                 time.sleep(5)
 
-                if "unauth" in driver.current_url or "帳號已鎖定" in driver.page_source:
-                    if case == "case1" and attempt_num == 3:
-                        log_result(f"[Case 1] Attempt {attempt_num}: Lockout page detected.")
-                        messagebox.showinfo("測試結果", "✅ Case 1 測試成功：第3次登入後導向鎖定頁面")
+                page = driver.page_source.lower()
+                current_url = driver.current_url.lower()
+                locked = ("unauth" in current_url or "帳號已鎖定" in page or "try again" in page)
+
+                if locked:
+                    if case == "case1" and attempt == 3:
+                        log_result(f"[Case 1] 第 {attempt} 次鎖定成功")
+                        print("✅ Case1 成功")
                         break
-                    elif case == "case2":
-                        if attempt_num == 3:
-                            log_result(f"[Case 2] Attempt {attempt_num}: Lockout detected, retrying...")
-                            driver.get(url)
-                            continue
-                        elif attempt_num == 6:
-                            if "try again in 1 minute" in driver.page_source.lower():
-                                log_result(f"[Case 2] Attempt {attempt_num}: 1-minute lockout detected.")
-                                messagebox.showinfo("測試結果", "✅ Case 2 測試成功：帳號鎖定，頁面顯示『try again in 1 minute』")
-                            else:
-                                log_result(f"[Case 2] Attempt {attempt_num}: Lockout found but no 1-minute text.")
-                                messagebox.showwarning("測試結果", "⚠️ Case 2：鎖定未顯示 1 分鐘訊息")
-                            break
-                    elif case == "case3":
-                        if attempt_num in [3, 6]:
-                            log_result(f"[Case 3] Attempt {attempt_num}: Lockout, reloading.")
-                            if attempt_num == 6:
-                                log_result(f"[Case 3] Waiting 65 seconds before next attempt.")
-                                time.sleep(65)
-                            driver.get(url)
-                            continue
-                        elif attempt_num == 9:
-                            if "5 minutes" in driver.page_source.lower() or "try again in 5 minute" in driver.page_source:
-                                log_result(f"[Case 3] Attempt {attempt_num}: 5-minute lockout detected.")
-                                messagebox.showinfo("測試結果", "✅ Case 3 測試成功：帳號鎖定 5 分鐘")
-                            else:
-                                log_result(f"[Case 3] Attempt {attempt_num}: Lockout but no 5-minute text.")
-                                messagebox.showwarning("測試結果", "⚠️ Case 3：鎖定未顯示 5 分鐘訊息")
-                            break
+                    elif case == "case2" and attempt == 6:
+                        if "1 minute" in page:
+                            log_result(f"[Case 2] 第 {attempt} 次鎖定成功（1分鐘）")
+                            print("✅ Case2 成功")
                         else:
-                            log_result(f"[Case 3] Attempt {attempt_num}: Lockout detected.")
+                            log_result(f"[Case 2] 第 {attempt} 次鎖定但無 1 分鐘提示")
+                            print("⚠️ Case2：未偵測到 1 分鐘文字")
+                        break
+                    elif case == "case3":
+                        if attempt in [3, 6]:
+                            log_result(f"[Case 3] 第 {attempt} 次暫時鎖定，繼續測試")
+                            if attempt == 6:
+                                log_result("[Case 3] 等待 65 秒解除暫鎖")
+                                time.sleep(65)
+                            continue
+                        elif attempt == 9:
+                            if "5 minute" in page or "5 分鐘" in page:
+                                log_result("[Case 3] 第 9 次鎖定成功（5分鐘）")
+                                print("✅ Case3 成功")
+                            else:
+                                log_result("[Case 3] 第 9 次鎖定但無 5 分鐘提示")
+                                print("⚠️ Case3：未偵測到 5 分鐘文字")
+                            break
+                    elif case == "case4":
+                        if attempt in [3, 6]:
+                            log_result(f"[Case 4] 第 {attempt} 次暫時鎖定，繼續測試")
+                            if attempt == 6:
+                                log_result("[Case 4] 等待 65 秒解除暫鎖")
+                                time.sleep(65)
+                            continue
+                        elif attempt == 9:
+                            if "5 minute" in page or "5 分鐘" in page:
+                                lock_9 = True
+                                log_result(f"[Case 4] 第 9 次鎖定成功（5分鐘）")
+                                print("📌 Case4：第 9 次鎖定成功，等待 5 分鐘")
+                                time.sleep(305)
+                            else:
+                                log_result(f"[Case 4] 第 9 次鎖定但無 5 分鐘提示")
+                                print("⚠️ Case4：第 9 次未偵測到 5 分鐘文字")
+                        elif attempt == 12:
+                            if "5 minute" in page or "5 分鐘" in page:
+                                lock_12 = True
+                                log_result(f"[Case 4] 第 12 次鎖定成功（5分鐘）")
+                                print("📌 Case4：第 12 次鎖定成功")
+                            else:
+                                log_result(f"[Case 4] 第 12 次鎖定但無 5 分鐘提示")
+                                print("⚠️ Case4：第 12 次未偵測到 5 分鐘文字")
                 else:
-                    log_result(f"[{case}] Attempt {attempt_num}: Login failed, no lockout.")
+                    log_result(f"[{case}] 第 {attempt} 次登入失敗但未鎖定")
 
             except Exception as inner_e:
-                log_result(f"[{case}] Attempt {attempt_num}: Exception - {inner_e}")
-                raise inner_e
+                log_result(f"[{case}] 第 {attempt} 次登入異常: {inner_e}")
+                raise
+
+        if case == "case4":
+            if lock_9 and lock_12:
+                print("✅ Case4 成功：第 9 與第 12 次皆鎖定 5 分鐘")
+                log_result("[Case 4] 測試成功")
+            else:
+                print("❌ Case4 失敗：第 9 或第 12 次未達成鎖定條件")
+                log_result("[Case 4] 測試失敗：條件未全達成")
 
     except Exception as e:
-        error_details = traceback.format_exc()
-        messagebox.showerror("錯誤", f"執行過程中發生錯誤：\n{error_details}")
-        log_result(f"[{case}] Exception during test: {error_details}")
+        log_result(f"[{case}] 總體錯誤：{e}\n{traceback.format_exc()}")
+        print(f"❌ 發生錯誤：{e}")
     finally:
         if driver:
             driver.quit()
             print("已關閉瀏覽器")
 
-# 建立 GUI
-root = tk.Tk()
-root.title("登入鎖定測試工具")
 
-tk.Label(root, text="登入網址：").grid(row=0, column=0, sticky="e")
-tk.Label(root, text="帳號：").grid(row=1, column=0, sticky="e")
-tk.Label(root, text="密碼：").grid(row=2, column=0, sticky="e")
-tk.Label(root, text="設備類型：").grid(row=3, column=0, sticky="e")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Login test with retry and case4 fix + 5min wait")
+    parser.add_argument("--url", required=True, help="Login URL")
+    parser.add_argument("--username", required=True, help="Login username")
+    parser.add_argument("--password", required=True, help="Wrong password to trigger lockout")
+    parser.add_argument("--device", required=True, choices=["router", "extender"], help="Device type")
+    parser.add_argument("--case", required=True, choices=["case1", "case2", "case3", "case4"], help="Test case")
+    parser.add_argument("--headed", action="store_true", help="Run in headed mode")
 
-url_entry = tk.Entry(root, width=40)
-username_entry = tk.Entry(root, width=40)
-password_entry = tk.Entry(root, width=40, show="*")
-device_var = tk.StringVar(value="router")
-device_menu = tk.OptionMenu(root, device_var, "router", "extender")
-
-url_entry.grid(row=0, column=1, padx=5, pady=5)
-username_entry.grid(row=1, column=1, padx=5, pady=5)
-password_entry.grid(row=2, column=1, padx=5, pady=5)
-device_menu.grid(row=3, column=1, padx=5, pady=5)
-
-tk.Button(root, text="Case 1：3次錯誤導向鎖定頁面", command=lambda: threading.Thread(target=run_test, args=("case1",)).start()).grid(row=4, column=0, columnspan=2, pady=5)
-tk.Button(root, text="Case 2：6次錯誤鎖定1分鐘", command=lambda: threading.Thread(target=run_test, args=("case2",)).start()).grid(row=5, column=0, columnspan=2, pady=5)
-tk.Button(root, text="Case 3：9次錯誤鎖定5分鐘", command=lambda: threading.Thread(target=run_test, args=("case3",)).start()).grid(row=6, column=0, columnspan=2, pady=5)
-
-root.mainloop()
-
+    args = parser.parse_args()
+    run_test(args.url, args.username, args.password, args.device, args.case, args.headed)
