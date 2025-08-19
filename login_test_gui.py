@@ -173,3 +173,22 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     run_test(args.url, args.username, args.password, args.device, args.case, args.headed)
+
+
+# --- 小函式 1：URL 正規化 , for CI test---
+def normalize_url(url: str) -> str:
+    url = (url or "").strip()
+    return url if url.startswith(("http://", "https://")) else "http://" + url
+
+# --- 小函式 2：鎖定規則, for CI test ---
+def lockout_action(failed_count: int):
+    """
+    回傳 ('retry', None) 或 ('lock', 秒數)
+    """
+    if failed_count == 3:
+        return ('lock', 60)     # 3 次 -> 鎖 1 分鐘
+    if failed_count == 6:
+        return ('lock', 60)     # 6 次 -> 再鎖 1 分鐘
+    if failed_count == 9:
+        return ('lock', 300)    # 9 次 -> 鎖 5 分鐘
+    return ('retry', None)
