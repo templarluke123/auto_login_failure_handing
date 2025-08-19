@@ -6,6 +6,7 @@ __pycache__/
 login_test_log.txt
 logs/
 dist/
+build/
 
 # VSCode 設定
 .vscode/
